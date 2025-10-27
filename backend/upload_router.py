@@ -10,10 +10,14 @@ from database import SessionLocal
 from models import Patient, StrokeScan, NIHSSAssessment, TreatmentPlan
 from tpa_eligibility import check_tpa_eligibility
 from chatgpt_service import get_chatgpt_service
+from ultralytics import YOLO
+from PIL import Image
 
 router = APIRouter()
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+model = YOLO("models/best.pt")
 
 def get_db():
     db = SessionLocal()
@@ -56,6 +60,16 @@ async def upload_scan(
     absolute_path = os.path.abspath(relative_path)
     with open(absolute_path, "wb") as buffer:
         buffer.write(await scan.read())
+    try:
+        img = Image.open(absolute_path)
+        results = model(img)
+        probs = results[0].probs
+        predicted_class = results[0].names[int(probs.top1)]
+        confidence = float(probs.top1conf)
+        ai_prediction = f"{predicted_class} ({confidence:.2%} confidence)"
+    except Exception as e:
+        ai_prediction = f"AI analysis failed: {str(e)}"
+        
 
     if db.query(Patient).filter_by(code=code).first():
         return HTMLResponse(content="Code already exists", status_code=400)
@@ -102,10 +116,12 @@ async def upload_scan(
     scan_record = StrokeScan(
         patient_id=patient.id,
         image_path=relative_path,
-        prediction=reason,
+        prediction=ai_prediction,
         eligibility_result=reason,
         eligible=eligible,
         timestamp=datetime.now()
+)
+
     )
     db.add(scan_record)
     db.commit()
