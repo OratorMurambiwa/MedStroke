@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Generate Treatment API</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        h2 {
+            color: #34495e;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        textarea {
+            height: 100px;
+            resize: vertical;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        button:disabled {
+            background-color: #bdc3c7;
+            cursor: not-allowed;
+        }
+        .result {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 20px;
+            margin-top: 20px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .error {
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+            color: #721c24;
+        }
+        .success {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+        }
+        .loading {
+            text-align: center;
+            color: #6c757d;
+            font-style: italic;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 OpenAI Treatment Plan Generator</h1>
+        <p style="text-align: center; color: #6c757d;">
+            Test the new /api/generate-treatment endpoint using OpenAI Chat Completions API
+        </p>
+    </div>
+
+    <div class="container">
+        <h2>Patient Information</h2>
+        <form id="patientForm">
+            <div class="grid">
+                <div class="form-group">
+                    <label for="name">Patient Name:</label>
+                    <input type="text" id="name" value="John Doe" required>
+                </div>
+                <div class="form-group">
+                    <label for="age">Age:</label>
+                    <input type="number" id="age" value="65" min="1" max="120" required>
+                </div>
+                <div class="form-group">
+                    <label for="nhiss_score">NIHSS Score:</label>
+                    <input type="number" id="nhiss_score" value="8" min="0" max="42" required>
+                </div>
+                <div class="form-group">
+                    <label for="systolic_bp">Systolic BP (mmHg):</label>
+                    <input type="number" id="systolic_bp" value="160" min="50" max="300" required>
+                </div>
+                <div class="form-group">
+                    <label for="diastolic_bp">Diastolic BP (mmHg):</label>
+                    <input type="number" id="diastolic_bp" value="95" min="30" max="200" required>
+                </div>
+                <div class="form-group">
+                    <label for="glucose">Glucose (mg/dL):</label>
+                    <input type="number" id="glucose" value="120" min="50" max="500" required>
+                </div>
+                <div class="form-group">
+                    <label for="oxygen_saturation">Oxygen Saturation (%):</label>
+                    <input type="number" id="oxygen_saturation" value="96" min="70" max="100" required>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="symptoms">Symptoms:</label>
+                <textarea id="symptoms" required>Sudden onset of left-sided weakness, slurred speech, and facial droop. Patient reports difficulty walking and holding objects with left hand. Symptoms started approximately 2 hours ago.</textarea>
+            </div>
+            
+            <button type="submit" id="generateBtn">🚀 Generate Treatment Plan</button>
+            <button type="button" id="clearBtn">🗑️ Clear Form</button>
+        </form>
+    </div>
+
+    <div class="container">
+        <h2>AI Treatment Plan</h2>
+        <div id="result" class="result" style="display: none;"></div>
+    </div>
+
+    <script>
+        document.getElementById('patientForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const generateBtn = document.getElementById('generateBtn');
+            const resultDiv = document.getElementById('result');
+            
+            // Disable button and show loading
+            generateBtn.disabled = true;
+            generateBtn.textContent = '⏳ Generating...';
+            
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'result loading';
+            resultDiv.textContent = '🤖 Sending request to OpenAI API...\nPlease wait while the AI generates your treatment plan.';
+            
+            // Collect form data
+            const patientData = {
+                name: document.getElementById('name').value,
+                age: parseInt(document.getElementById('age').value),
+                nhiss_score: parseInt(document.getElementById('nhiss_score').value),
+                systolic_bp: parseInt(document.getElementById('systolic_bp').value),
+                diastolic_bp: parseInt(document.getElementById('diastolic_bp').value),
+                glucose: parseInt(document.getElementById('glucose').value),
+                oxygen_saturation: parseInt(document.getElementById('oxygen_saturation').value),
+                symptoms: document.getElementById('symptoms').value
+            };
+            
+            try {
+                const response = await fetch('/api/generate-treatment', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(patientData)
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.className = 'result success';
+                    resultDiv.textContent = `✅ Treatment Plan Generated Successfully!
+
+Model Used: ${data.model_used}
+Patient: ${data.patient_name}
+Generated At: ${data.generated_at}
+
+TREATMENT PLAN:
+${'='.repeat(50)}
+${data.treatment_plan}`;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = `❌ Error: ${data.detail || 'Unknown error occurred'}`;
+                }
+                
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = `❌ Network Error: ${error.message}\n\nMake sure your FastAPI server is running and accessible.`;
+            }
+            
+            // Re-enable button
+            generateBtn.disabled = false;
+            generateBtn.textContent = '🚀 Generate Treatment Plan';
+        });
+        
+        document.getElementById('clearBtn').addEventListener('click', function() {
+            document.getElementById('patientForm').reset();
+            document.getElementById('result').style.display = 'none';
+        });
+        
+        // Add some sample data buttons for quick testing
+        const sampleButtons = document.createElement('div');
+        sampleButtons.innerHTML = `
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
+                <h3>Quick Test Cases:</h3>
+                <button onclick="loadSampleData('mild')" style="background-color: #27ae60;">Mild Stroke</button>
+                <button onclick="loadSampleData('moderate')" style="background-color: #f39c12;">Moderate Stroke</button>
+                <button onclick="loadSampleData('severe')" style="background-color: #e74c3c;">Severe Stroke</button>
+            </div>
+        `;
+        document.getElementById('patientForm').appendChild(sampleButtons);
+        
+        function loadSampleData(type) {
+            const samples = {
+                mild: {
+                    name: "Alice Johnson",
+                    age: 58,
+                    nhiss_score: 4,
+                    systolic_bp: 140,
+                    diastolic_bp: 85,
+                    glucose: 95,
+                    oxygen_saturation: 98,
+                    symptoms: "Mild weakness in right hand, slight speech difficulty. Symptoms started 1 hour ago."
+                },
+                moderate: {
+                    name: "Robert Smith",
+                    age: 72,
+                    nhiss_score: 12,
+                    systolic_bp: 180,
+                    diastolic_bp: 100,
+                    glucose: 150,
+                    oxygen_saturation: 94,
+                    symptoms: "Significant right-sided weakness, moderate speech impairment, facial droop. Symptoms started 2.5 hours ago."
+                },
+                severe: {
+                    name: "Maria Garcia",
+                    age: 68,
+                    nhiss_score: 20,
+                    systolic_bp: 200,
+                    diastolic_bp: 110,
+                    glucose: 180,
+                    oxygen_saturation: 92,
+                    symptoms: "Severe left-sided paralysis, severe speech impairment, altered consciousness. Symptoms started 1.5 hours ago."
+                }
+            };
+            
+            const sample = samples[type];
+            Object.keys(sample).forEach(key => {
+                const element = document.getElementById(key);
+                if (element) {
+                    element.value = sample[key];
+                }
+            });
+        }
+    </script>
+</body>
+</html>
