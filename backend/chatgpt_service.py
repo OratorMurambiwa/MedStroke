@@ -35,16 +35,18 @@ class ChatGPTTreatmentPlanService:
                 messages=[
                     {
                         "role": "system", 
-                        "content": "You are an expert neurologist specializing in stroke treatment. Provide detailed, evidence-based treatment plans following current medical guidelines."
+                        "content": "You are a stroke neurologist. Provide concise medical recommendations only."
                     },
                     {
                         "role": "user", 
                         "content": prompt
                     }
                 ],
-                max_tokens=1500,
-                temperature=0.3  # Lower temperature for more consistent, medical-focused responses
+                max_tokens=300,   # keeps it short
+                temperature=0.1   # keeps it clinical
             )
+
+
             
             return response.choices[0].message.content.strip()
             

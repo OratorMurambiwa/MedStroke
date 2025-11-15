@@ -809,24 +809,7 @@
         <div class="upload-section">
           <h3>Scan Upload & Imaging Confirmation</h3>
           
-          <div class="form-group">
-            <label for="scanType" class="form-label">Scan Type *</label>
-            <select id="scanType" name="scanType" class="form-select" required>
-              <option value="">Select Scan Type</option>
-              <option value="CT">CT Scan</option>
-              <option value="MRI">MRI Scan</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label for="imagingConfirmed" class="form-label">Imaging Confirmed: Ischemic Stroke? *</label>
-            <select id="imagingConfirmed" name="imagingConfirmed" class="form-select" required>
-              <option value="">Select Confirmation</option>
-              <option value="yes">Yes - Ischemic stroke confirmed</option>
-              <option value="no">No - Not confirmed</option>
-            </select>
-          </div>
-
+        
           <div class="form-group">
             <label class="form-label">Upload CT/MRI Scan *</label>
             <div class="file-upload">
@@ -1261,8 +1244,6 @@
         // Prepare form data
         const formData = new FormData();
         formData.append('patient_code', patientCode);
-        formData.append('scan_type', document.getElementById('scanType').value);
-        formData.append('imaging_confirmed', document.getElementById('imagingConfirmed').value);
         formData.append('scan_file', document.getElementById('scanFile').files[0]);
 
         const response = await fetch('/api/upload-scan', {

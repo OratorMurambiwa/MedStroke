@@ -9,12 +9,8 @@ __pycache__/
 .env
 .env.local
 
-# Database files
-*.db
-*.sqlite
-*.sqlite3
 
-# Uploads directory
+# # Uploads directory
 uploads/
 
 # IDE

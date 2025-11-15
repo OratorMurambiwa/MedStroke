@@ -7,6 +7,7 @@ from datetime import datetime
 import os
 import shutil
 from dotenv import load_dotenv
+from openai import OpenAI
 from tpa_eligibility import check_tpa_eligibility
 
 # Load environment variables
@@ -15,6 +16,12 @@ try:
 except Exception as e:
     print(f"Warning: Could not load .env file: {e}")
     print("Continuing without .env file...")
+    
+openai_api_key = os.getenv("OPENAI_API_KEY")
+if not openai_api_key:
+    print("OPENAI_API_KEY not found in environment variables!")
+
+client = OpenAI(api_key=openai_api_key)
 
 # Import database and models
 from database import Base, engine, get_db
@@ -97,6 +104,10 @@ def serve_login_page():
 @app.get("/register-page")
 def serve_register_page():
     return FileResponse(os.path.join("../frontend", "register.html"))
+
+@app.get("/register-staff-page")
+def serve_register_staff_page():
+    return FileResponse(os.path.join("../frontend", "register_staff.html"))
 
 @app.get("/upload-form")
 def serve_upload_form():
@@ -366,84 +377,92 @@ def get_nihss_assessment(patient_code: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Failed to get NIHSS assessment: {str(e)}")
 
 # API endpoint to upload scan and run tPA eligibility check
+# API endpoint to upload scan and run tPA eligibility check
 @app.post("/api/upload-scan")
 async def upload_scan_and_check_eligibility(
     patient_code: str = Form(...),
-    scan_type: str = Form(...),
-    imaging_confirmed: str = Form(...),
     scan_file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
     try:
-        # Get patient data
-        patient = db.query(models.Patient).filter(models.Patient.code == patient_code).first()
+        # 1. Get patient data
+        patient = db.query(models.Patient).filter(
+            models.Patient.code == patient_code
+        ).first()
+
         if not patient:
             raise HTTPException(status_code=404, detail="Patient not found")
-        
-        # Get NIHSS assessment
+
+        # 2. Get NIHSS assessment (must exist)
         nihss_assessment = db.query(models.NIHSSAssessment).filter(
             models.NIHSSAssessment.patient_id == patient.id
         ).order_by(models.NIHSSAssessment.timestamp.desc()).first()
-        
+
         if not nihss_assessment:
-            raise HTTPException(status_code=400, detail="NIHSS assessment not found for patient")
-        
-        # Save uploaded file
+            raise HTTPException(
+                status_code=400,
+                detail="NIHSS assessment not found for patient"
+            )
+
+        # 3. Save uploaded file
         upload_dir = "../uploads"
         os.makedirs(upload_dir, exist_ok=True)
-        
+
         timestamp = datetime.now().timestamp()
         filename = f"{timestamp}_{patient_code}_{scan_file.filename}"
         file_path = os.path.join(upload_dir, filename)
-        
+
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(scan_file.file, buffer)
-        
-        # Prepare data for tPA eligibility check
-        # Convert time since onset to hours (simplified - you might want to parse this better)
-        time_since_onset_hours = 2.0  # Default value, you might want to parse from patient.time_since_onset
-        
+
+        # 4. Prepare data for tPA eligibility check
+        time_since_onset_hours = 2.0  # Placeholder — update when needed
+
         eligibility_data = {
             "age": patient.age,
             "hours_since_onset": time_since_onset_hours,
-            "imaging_confirmed": imaging_confirmed,
-            "consent": "yes",  # Assuming consent was given in the workflow
+            "imaging_confirmed": "yes",   # Default now (because UI removed it)
+            "consent": "yes",
+
             "nhiss_score": nihss_assessment.total_score,
             "inr": patient.inr or 1.0,
             "heart_rate": patient.heart_rate or 80,
-            "respiratory_rate": 16,  # Default value
+            "respiratory_rate": 16,
             "temperature": patient.temperature or 98.6,
             "oxygen_saturation": patient.oxygen_saturation or 98,
-            "recent_trauma": "no",  # Default values - you might want to add these fields
+
+            "recent_trauma": "no",
             "recent_stroke_or_injury": "no",
             "intracranial_issue": "no",
             "recent_mi": "no",
+
             "systolic_bp": patient.systolic_bp or 120,
             "diastolic_bp": patient.diastolic_bp or 80,
             "glucose": patient.glucose or 100,
             "anticoagulant_risk": "no",
             "platelet_count": patient.platelet_count or 250,
-            "recent_surgery": "no"
+            "recent_surgery": "no",
         }
-        
-        # Run tPA eligibility check
+
+        # 5. Run tPA eligibility logic
         is_eligible, reason = check_tpa_eligibility(eligibility_data)
-        
-        # Create stroke scan record
+
+        # 6. Save scan record in database
         stroke_scan = models.StrokeScan(
             patient_id=patient.id,
             image_path=file_path,
-            prediction="Ischemic Stroke" if imaging_confirmed == "yes" else "Not Confirmed",
+            prediction="Ischemic Stroke",      # since imaging_confirmed is removed
             timestamp=datetime.now(),
-            doctor_comment=f"Scan type: {scan_type}, Imaging confirmed: {imaging_confirmed}",
+            doctor_comment="Scan uploaded",    # no scan_type/imaging_confirmed anymore
             eligibility_result=reason,
             eligible=is_eligible
         )
-        
+
         db.add(stroke_scan)
         db.commit()
         db.refresh(stroke_scan)
-        
+
+        # 7. Return response to frontend
         return {
             "eligible": is_eligible,
             "reason": reason,
@@ -451,12 +470,16 @@ async def upload_scan_and_check_eligibility(
             "patient_code": patient.code,
             "message": "Scan uploaded and tPA eligibility assessed successfully"
         }
-        
+
     except HTTPException:
         raise
+
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to process scan: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process scan: {str(e)}"
+        )
 
 # API endpoint to save patient record with technician notes
 @app.post("/api/patients/save-record")
@@ -642,3 +665,38 @@ def get_patient_treatment_plans(patient_code: str, db: Session = Depends(get_db)
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+class DoctorDecision(BaseModel):
+    decision: str
+    comment: str = ""
+   
+@app.post("/api/scans/{scan_id}/decision")
+async def doctor_decision(
+    scan_id: int,
+    payload: DoctorDecision,
+    db: Session = Depends(get_db)
+):
+    try:
+        decision = payload.decision
+        doctor_comment = payload.comment
+
+        if decision not in ["eligible", "not_eligible"]:
+            raise HTTPException(status_code=400, detail="Invalid decision type")
+
+        scan = db.query(models.StrokeScan).filter(models.StrokeScan.id == scan_id).first()
+        if not scan:
+            raise HTTPException(status_code=404, detail="Scan not found")
+
+        scan.eligible = True if decision == "eligible" else False
+        scan.status = "reviewed"
+        scan.doctor_comment = doctor_comment
+        scan.review_date = datetime.now()   # recommended
+
+        db.commit()
+        db.refresh(scan)
+
+        return {"message": "Decision saved successfully"}
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to save decision: {str(e)}")
