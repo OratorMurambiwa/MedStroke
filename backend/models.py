@@ -67,6 +67,7 @@ class StrokeScan(Base):
     # pending → technician submitted
     # ready_for_review → physician needs to check
     # reviewed → physician finished
+    reviewed_at = Column(DateTime)
 
     patient = relationship("Patient", back_populates="scans")
 

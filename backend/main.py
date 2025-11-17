@@ -9,6 +9,7 @@ import shutil
 from dotenv import load_dotenv
 from openai import OpenAI
 from tpa_eligibility import check_tpa_eligibility
+from chatgpt_service import get_chatgpt_service
 
 # Load environment variables
 try:
@@ -84,9 +85,21 @@ class NIHSSAssessment(BaseModel):
     extinction: int
     total_score: int
 
+class DoctorDecision(BaseModel):
+    decision: str
+    comment: str = ""
+
+class GenerateTreatmentPlanRequest(BaseModel):
+    scan_id: int
+    plan_type: str = "standard"  # can be "standard" or "alternative"
+
+class SaveTreatmentPlanRequest(BaseModel):
+    physician_notes: str
+    status: str = "approved"
+
 # ✅ Mount static and upload folders
 app.mount("/static", StaticFiles(directory="../frontend"), name="static")
-app.mount("/uploads", StaticFiles(directory="../uploads"), name="uploads")
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # ✅ Include route handlers
 app.include_router(auth_router)
@@ -190,7 +203,48 @@ def create_patient(patient_data: PatientCreate, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to create patient: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate treatment plan: {str(e)}")
+
+
+# API endpoint to save/update treatment plan with doctor's notes
+@app.put("/api/treatment-plans/{plan_id}")
+async def update_treatment_plan(
+    plan_id: int,
+    request: SaveTreatmentPlanRequest,
+    db: Session = Depends(get_db)
+):
+    try:
+        treatment_plan = db.query(models.TreatmentPlan).filter(
+            models.TreatmentPlan.id == plan_id
+        ).first()
+        
+        if not treatment_plan:
+            raise HTTPException(status_code=404, detail="Treatment plan not found")
+        
+        # Update with physician notes
+        treatment_plan.physician_notes = request.physician_notes
+        treatment_plan.status = request.status
+        treatment_plan.updated_at = datetime.now()
+        
+        db.commit()
+        db.refresh(treatment_plan)
+        
+        return {
+            "message": "Treatment plan updated successfully",
+            "plan_id": treatment_plan.id,
+            "status": treatment_plan.status
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update treatment plan: {str(e)}")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
 
 # API endpoint to get patient by code
 @app.get("/api/patients/{patient_code}")
@@ -377,7 +431,6 @@ def get_nihss_assessment(patient_code: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Failed to get NIHSS assessment: {str(e)}")
 
 # API endpoint to upload scan and run tPA eligibility check
-# API endpoint to upload scan and run tPA eligibility check
 @app.post("/api/upload-scan")
 async def upload_scan_and_check_eligibility(
     patient_code: str = Form(...),
@@ -405,13 +458,14 @@ async def upload_scan_and_check_eligibility(
             )
 
         # 3. Save uploaded file
-        upload_dir = "../uploads"
+        upload_dir = "uploads"  # Changed from "../uploads" to "uploads"
         os.makedirs(upload_dir, exist_ok=True)
 
         timestamp = datetime.now().timestamp()
         filename = f"{timestamp}_{patient_code}_{scan_file.filename}"
         file_path = os.path.join(upload_dir, filename)
-
+        
+        # Save the file
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(scan_file.file, buffer)
 
@@ -421,7 +475,7 @@ async def upload_scan_and_check_eligibility(
         eligibility_data = {
             "age": patient.age,
             "hours_since_onset": time_since_onset_hours,
-            "imaging_confirmed": "yes",   # Default now (because UI removed it)
+            "imaging_confirmed": "yes",
             "consent": "yes",
 
             "nhiss_score": nihss_assessment.total_score,
@@ -448,12 +502,15 @@ async def upload_scan_and_check_eligibility(
         is_eligible, reason = check_tpa_eligibility(eligibility_data)
 
         # 6. Save scan record in database
+        # Use relative path with forward slashes for web compatibility
+        relative_path = file_path.replace("\\", "/")
+        
         stroke_scan = models.StrokeScan(
             patient_id=patient.id,
-            image_path=file_path,
-            prediction="Ischemic Stroke",      # since imaging_confirmed is removed
+            image_path=relative_path,  # Changed from file_path to relative_path
+            prediction="Ischemic Stroke",
             timestamp=datetime.now(),
-            doctor_comment="Scan uploaded",    # no scan_type/imaging_confirmed anymore
+            doctor_comment="Scan uploaded",
             eligibility_result=reason,
             eligible=is_eligible
         )
@@ -662,14 +719,7 @@ def get_patient_treatment_plans(patient_code: str, db: Session = Depends(get_db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get treatment plans: {str(e)}")
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-
-class DoctorDecision(BaseModel):
-    decision: str
-    comment: str = ""
-   
+# API endpoint for doctor decision
 @app.post("/api/scans/{scan_id}/decision")
 async def doctor_decision(
     scan_id: int,
@@ -690,7 +740,7 @@ async def doctor_decision(
         scan.eligible = True if decision == "eligible" else False
         scan.status = "reviewed"
         scan.doctor_comment = doctor_comment
-        scan.review_date = datetime.now()   # recommended
+        scan.reviewed_at = datetime.now()
 
         db.commit()
         db.refresh(scan)
@@ -700,3 +750,104 @@ async def doctor_decision(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to save decision: {str(e)}")
+
+# API endpoint to generate treatment plan
+@app.post("/api/scans/{scan_id}/generate-treatment-plan")
+async def generate_treatment_plan(
+    scan_id: int,
+    request: GenerateTreatmentPlanRequest,
+    db: Session = Depends(get_db)
+):
+    try:
+        # Get the scan
+        scan = db.query(models.StrokeScan).filter(models.StrokeScan.id == scan_id).first()
+        if not scan:
+            raise HTTPException(status_code=404, detail="Scan not found")
+        
+        # Get the patient
+        patient = db.query(models.Patient).filter(models.Patient.id == scan.patient_id).first()
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        
+        # Prepare patient data
+        patient_data = {
+            "name": patient.name,
+            "age": patient.age,
+            "gender": patient.gender,
+            "chief_complaint": patient.chief_complaint,
+            "time_since_onset": patient.time_since_onset,
+            "systolic_bp": patient.systolic_bp,
+            "diastolic_bp": patient.diastolic_bp,
+            "heart_rate": patient.heart_rate,
+            "temperature": patient.temperature,
+            "oxygen_saturation": patient.oxygen_saturation,
+            "glucose": patient.glucose,
+            "inr": patient.inr
+        }
+        
+        # Prepare scan data
+        scan_data = {
+            "imaging_confirmed": "yes",
+            "prediction": scan.prediction
+        }
+        
+        # Generate treatment plan using ChatGPT
+        chatgpt_service = get_chatgpt_service()
+        ai_plan = chatgpt_service.generate_treatment_plan(
+            patient_data=patient_data,
+            scan_data=scan_data,
+            eligibility_result=scan.eligibility_result or "Assessment completed",
+            is_eligible=scan.eligible
+        )
+        
+        # Determine plan type based on eligibility
+        if not scan.eligible:
+            plan_type = "alternative"
+        else:
+            plan_type = request.plan_type or "standard"
+        
+        # Check if a treatment plan already exists for this scan
+        existing_plan = db.query(models.TreatmentPlan).filter(
+            models.TreatmentPlan.scan_id == scan_id,
+            models.TreatmentPlan.plan_type == plan_type
+        ).first()
+        
+        if existing_plan:
+            # Update existing plan
+            existing_plan.ai_generated_plan = ai_plan
+            existing_plan.updated_at = datetime.now()
+            db.commit()
+            db.refresh(existing_plan)
+            
+            return {
+                "message": "Treatment plan updated successfully",
+                "plan_id": existing_plan.id,
+                "plan_type": plan_type,
+                "ai_generated_plan": ai_plan
+            }
+        else:
+            # Create new treatment plan
+            treatment_plan = models.TreatmentPlan(
+                patient_id=patient.id,
+                scan_id=scan_id,
+                plan_type=plan_type,
+                ai_generated_plan=ai_plan,
+                status="pending",
+                created_by="AI System",
+                created_at=datetime.now()
+            )
+            
+            db.add(treatment_plan)
+            db.commit()
+            db.refresh(treatment_plan)
+            
+            return {
+                "message": "Treatment plan generated successfully",
+                "plan_id": treatment_plan.id,
+                "plan_type": plan_type,
+                "ai_generated_plan": ai_plan,
+                "eligible": scan.eligible
+            }
+        
+    except HTTPException:
+        raise

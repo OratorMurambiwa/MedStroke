@@ -309,7 +309,8 @@ def get_physician_dashboard_stats(db: Session = Depends(get_db)):
         today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         reviewed_today = db.query(StrokeScan).filter(
             StrokeScan.status == "reviewed",
-            StrokeScan.timestamp >= today
+            StrokeScan.reviewed_at != None,
+            StrokeScan.reviewed_at >= today
         ).count()
         
         # Eligible for tPA: Count of confirmed eligible cases (eligible = True)
@@ -357,7 +358,8 @@ def get_reviewed_today_detail(db: Session = Depends(get_db)):
         today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         scans = db.query(StrokeScan).filter(
             StrokeScan.status == "reviewed",
-            StrokeScan.timestamp >= today
+            StrokeScan.reviewed_at != None,
+            StrokeScan.reviewed_at >= today
         ).all()
         return [
             {
@@ -367,7 +369,9 @@ def get_reviewed_today_detail(db: Session = Depends(get_db)):
                 "patient_age": scan.patient.age,
                 "patient_gender": scan.patient.gender,
                 "chief_complaint": scan.patient.chief_complaint or "N/A",
-                "review_date": scan.timestamp.strftime("%Y-%m-%d %H:%M") if scan.timestamp else "N/A",
+                "review_date": scan.reviewed_at.strftime("%Y-%m-%d %H:%M") if scan.reviewed_at else (
+                    scan.timestamp.strftime("%Y-%m-%d %H:%M") if scan.timestamp else "N/A"
+                ),
                 "status": scan.status,
                 "diagnosis": scan.prediction or "N/A",
                 "doctor_comment": scan.doctor_comment or "No comment",
@@ -895,6 +899,8 @@ def get_patient_treatment_plans(patient_code: str, db: Session = Depends(get_db)
                 "plan_type": tp.plan_type,
                 "status": tp.status,
                 "created_by": tp.created_by,
+                "ai_generated_plan": tp.ai_generated_plan,
+                "physician_notes": tp.physician_notes,
                 "created_at": tp.created_at.strftime("%Y-%m-%d %H:%M") if tp.created_at else None,
                 "updated_at": tp.updated_at.strftime("%Y-%m-%d %H:%M") if tp.updated_at else None
             }
