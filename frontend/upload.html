@@ -195,10 +195,12 @@
       text-align: center;
       background-color: #fff8e1;
       transition: all 0.3s ease;
+      position: relative;
     }
 
     .file-upload:hover {
       background-color: #fff3c4;
+      border-color: #d4a218;
     }
 
     .file-upload input[type="file"] {
@@ -211,6 +213,11 @@
       color: #FDB927;
       font-weight: 600;
       font-size: 16px;
+      min-height: 60px;
+    }
+
+    .file-upload-label:hover {
+      color: #d4a218;
     }
 
     .file-upload-icon {
@@ -1231,6 +1238,13 @@
         return;
       }
 
+      // Validate file is selected
+      const fileInput = document.getElementById('scanFile');
+      if (!fileInput.files || fileInput.files.length === 0) {
+        alert('Please select a scan file to upload');
+        return;
+      }
+
       // Show loading state
       const submitBtn = document.getElementById('submitBtn');
       const loadingDiv = document.getElementById('loadingDiv');
@@ -1244,7 +1258,7 @@
         // Prepare form data
         const formData = new FormData();
         formData.append('patient_code', patientCode);
-        formData.append('scan_file', document.getElementById('scanFile').files[0]);
+        formData.append('scan_file', fileInput.files[0]);
 
         const response = await fetch('/api/upload-scan', {
           method: 'POST',
@@ -1303,6 +1317,38 @@
             <p>${error.message || 'Failed to process scan. Please try again.'}</p>
           `;
         }
+      }
+    });
+
+    // Add file selection feedback
+    document.getElementById('scanFile').addEventListener('change', function(e) {
+      const fileInput = e.target;
+      const fileLabel = document.querySelector('.file-upload-label');
+      
+      if (fileInput.files && fileInput.files.length > 0) {
+        const fileName = fileInput.files[0].name;
+        const fileSize = (fileInput.files[0].size / 1024 / 1024).toFixed(2); // Size in MB
+        
+        // Update label to show selected file
+        fileLabel.innerHTML = `
+          <span class="file-upload-icon">✅</span>
+          <strong>Selected:</strong> ${fileName}<br>
+          <small style="color: #666;">Size: ${fileSize} MB</small>
+        `;
+        
+        // Change border color to indicate file selected
+        fileInput.closest('.file-upload').style.borderColor = '#28a745';
+        fileInput.closest('.file-upload').style.backgroundColor = '#d4edda';
+      } else {
+        // Reset to default
+        fileLabel.innerHTML = `
+          <span class="file-upload-icon">📁</span>
+          Click to upload scan image
+          <br>
+          <small style="color: #666;">Supports: JPG, PNG, GIF</small>
+        `;
+        fileInput.closest('.file-upload').style.borderColor = '#FDB927';
+        fileInput.closest('.file-upload').style.backgroundColor = '#fff8e1';
       }
     });
 
